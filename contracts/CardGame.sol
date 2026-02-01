@@ -12,26 +12,34 @@ contract CardGame {
         bool hasJoined;
     }
 
-    // Game Config
+    // Config
     mapping(uint => Card) public cards;
     uint public constant MAX_HP = 100;
+    uint256 public constant ENTRY_FEE = 0.0067 ether; // 0.0067 QUAI
     
     // State
-    uint public gameId; // Session ID (Epoch)
-    mapping(uint => mapping(address => Player)) public players; // gameId => address => Player
+    uint public gameId; 
+    mapping(uint => mapping(address => Player)) public players; 
     
-    mapping(uint => uint) public teamHP;   // Team ID => HP
-    mapping(uint => uint) public teamSize; // Team ID => Player Count
-    mapping(uint => uint) public teamCards; // Team ID => Total Cards Left
+    mapping(uint => uint) public teamHP;   
+    mapping(uint => uint) public teamSize; 
+    mapping(uint => uint) public teamCards; 
 
-    uint public currentTeamTurn; // 1 or 2
+    // Betting / Prizes
+    mapping(uint => uint256) public gamePrizePool;       // gameId => total pot
+    mapping(uint => uint) public gameWinningTeam;        // gameId => winning team ID
+    mapping(uint => uint) public gameWinnerCount;        // gameId => num players on winning team
+    mapping(uint => mapping(address => bool)) public hasClaimed; // gameId => has user claimed
+
+    uint public currentTeamTurn; 
     bool public gameActive;
-    uint public winnerTeam;
+    uint public winnerTeam; // Current game winner (temp)
 
     event GameStarted(uint gameId);
     event PlayerJoined(uint gameId, address player, uint team);
     event CardPlayed(address player, uint team, uint cardId, uint damage);
-    event GameEnded(uint winningTeam);
+    event GameEnded(uint winningTeam, uint256 totalPrize);
+    event RewardClaimed(address player, uint256 amount);
 
     constructor() {
         cards[0] = Card(5);
@@ -39,10 +47,11 @@ contract CardGame {
         cards[2] = Card(3);
         cards[3] = Card(12);
         cards[4] = Card(6);
-        gameId = 1; // Start at 1
+        gameId = 1; 
     }
 
-    function joinTeam(uint _teamId) public {
+    function joinTeam(uint _teamId) public payable {
+        require(msg.value == ENTRY_FEE, "Entry Fee is 0.0067 QUAI");
         require(_teamId == 1 || _teamId == 2, "Invalid team. Choose 1 or 2");
         require(!players[gameId][msg.sender].hasJoined, "Already joined this game");
         require(winnerTeam == 0, "Game finished. Reset to play.");
@@ -57,11 +66,13 @@ contract CardGame {
         });
 
         teamSize[_teamId]++;
-        teamCards[_teamId] += 5; // Add to team total
+        teamCards[_teamId] += 5; 
+        
+        // Add to Pot
+        gamePrizePool[gameId] += msg.value;
 
         emit PlayerJoined(gameId, msg.sender, _teamId);
 
-        // Auto-start if both teams have players and game is inactive
         if (teamSize[1] >= 1 && teamSize[2] >= 1 && !gameActive && winnerTeam == 0) {
             startGame();
         }
@@ -76,11 +87,39 @@ contract CardGame {
         emit GameStarted(gameId);
     }
 
+    // Winners call this to get their share!
+    function claimReward(uint _gameId) public {
+        uint winningTeamId = gameWinningTeam[_gameId];
+        require(winningTeamId != 0, "Game not finished or no winner");
+        
+        Player storage p = players[_gameId][msg.sender];
+        require(p.hasJoined, "Did not play in this game");
+        require(p.team == winningTeamId, "You were not on the winning team");
+        require(!hasClaimed[_gameId][msg.sender], "Already claimed");
+
+        // Calculate Share
+        // Total Pool / Number of Winners
+        uint256 totalPool = gamePrizePool[_gameId];
+        uint256 winnerCount = gameWinnerCount[_gameId];
+        require(winnerCount > 0, "No winners?");
+
+        uint256 share = totalPool / winnerCount;
+        
+        hasClaimed[_gameId][msg.sender] = true;
+        
+        payable(msg.sender).transfer(share);
+        emit RewardClaimed(msg.sender, share);
+    }
+
     function resetGame() public {
-        // Increment Epoc to invalidate previous players
+        require(!gameActive, "Cannot reset while active");
+        // Ensure the current game actually allowed for declaring a winner history before incrementing
+        if (winnerTeam != 0) {
+            // It was already recorded in finishGame
+        }
+
         gameId++; 
         
-        // Reset Board
         gameActive = false;
         teamHP[1] = MAX_HP;
         teamHP[2] = MAX_HP;
@@ -89,9 +128,7 @@ contract CardGame {
         teamCards[1] = 0;
         teamCards[2] = 0;
         winnerTeam = 0;
-        
         currentTeamTurn = 1;
-        // Do NOT start until people join the new gameId
     }
 
     function shuffleDeck(address player) internal view returns (uint[] memory) {
@@ -113,7 +150,6 @@ contract CardGame {
         uint cardId = p.deck[index];
         uint damage = cards[cardId].attack;
 
-        // Damage Opponent
         uint opponentTeam = (p.team == 1) ? 2 : 1;
         if (teamHP[opponentTeam] <= damage) {
             teamHP[opponentTeam] = 0;
@@ -125,30 +161,29 @@ contract CardGame {
 
         emit CardPlayed(msg.sender, p.team, cardId, damage);
 
-        // Remove card
         p.deck[index] = p.deck[p.deck.length - 1];
         p.deck.pop();
-        teamCards[p.team]--; // Decrement team card count
+        teamCards[p.team]--; 
 
-        // Check Win Condition: Fatigue / Total Domination
-        // If the opponent team has 0 cards left, they cannot win. Current team wins.
-        // Also check if current team ran out of cards? No, they just played, so they had at least 1.
         if (teamCards[opponentTeam] == 0) {
-            finishGame(p.team); // You win because opponent is defenseless
+            finishGame(p.team); 
             return;
         }
 
-        // Switch Turn
         currentTeamTurn = opponentTeam;
     }
     
     function finishGame(uint winner) internal {
         gameActive = false;
         winnerTeam = winner;
-        emit GameEnded(winner);
+        
+        // Record History for Claiming
+        gameWinningTeam[gameId] = winner;
+        gameWinnerCount[gameId] = teamSize[winner]; // Total players on winning team
+
+        emit GameEnded(winner, gamePrizePool[gameId]);
     }
 
-    // Read Helpers
     function getMyDeck() public view returns (uint[] memory) {
         return players[gameId][msg.sender].deck;
     }
@@ -163,7 +198,8 @@ contract CardGame {
         uint count2,
         uint cards1,
         uint cards2,
-        uint currentGameId
+        uint currentGameId,
+        uint256 prizePool // New Field
     ) {
         return (
             gameActive,
@@ -175,7 +211,8 @@ contract CardGame {
             teamSize[2],
             teamCards[1],
             teamCards[2],
-            gameId
+            gameId,
+            gamePrizePool[gameId]
         );
     }
 }
