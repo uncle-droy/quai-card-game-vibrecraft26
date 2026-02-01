@@ -13,30 +13,30 @@ Unlike traditional card games where assets are static, **Quai Battle** is dynami
 The game leverages a decentralized architecture ensuring fairness and immutability.
 
 ```mermaid
-+-----------------+       +-------------------+       +-------------------------+
-|  User (Browser) | <---> |  Pelagus Wallet   | <---> |  Quai Network (Orchard) |
-|   [React + Vite]|       | [Signer/Provider] |       |  [Smart Contract]       |
-+-----------------+       +-------------------+       +-------------------------+
-        |                           |                          |
-        | 1. "Join Red Team"        |                          |
-        +-------------------------> |                          |
-                                    | 2. Sign Transaction      |
-                                    +------------------------> | 3. Execute joinTeam()
-                                                               |    - Stake 0.0067 QUAI
-                                                               |    - Generate Random Deck
-                                                               |    - Emit PlayerJoined Event
-                                    <--------------------------+
-        | 4. Update UI (Listen)     |                          |
-        |    - "Waiting for Host"   |                          |
-        +---------------------------+                          |
-                                                               |
-        | 5. "Play Card" Action     |                          |
-        +-------------------------> | 6. Sign Transaction      |
-                                    +------------------------> | 7. Execute playCard()
-                                                               |    - Calculate Damage
-                                                               |    - Update HP
-                                                               |    - Check Win Condition
-                                                               |    - Auto-Payout (if Win)
+sequenceDiagram
+    participant User as User (React UI)
+    participant Wallet as Pelagus Wallet
+    participant Chain as Quai Network
+
+    User->>Wallet: "Join Red Team" (Click Button)
+    Wallet->>User: Request Signature
+    User->>Wallet: Approve Transaction
+    Wallet->>Chain: Execute joinTeam() {value: 0.0067 QUAI}
+    Chain-->>Chain: Stake Funds & Randomize Deck
+    Chain-->>User: Emit PlayerJoined Event
+    
+    Note over User: UI Updates: "Waiting for Battle"
+
+    User->>Wallet: "Play Card" (Select Attack)
+    Wallet->>Chain: Execute playCard(index)
+    Chain-->>Chain: Calculate Damage & Update HP
+    
+    alt Winner Determined
+        Chain-->>Chain: Auto-Distribute Prize Pool
+        Chain-->>User: Emit GameEnded & PayoutSent
+    else Turn Switch
+        Chain-->>User: Update Game State
+    end
 ```
 
 ---
