@@ -15,31 +15,31 @@ contract CardGame {
     // Config
     mapping(uint => Card) public cards;
     uint public constant MAX_HP = 100;
-    uint256 public constant ENTRY_FEE = 0.0067 ether; // 0.0067 QUAI
+    uint256 public constant ENTRY_FEE = 0.0067 ether; 
     
     // State
     uint public gameId; 
     mapping(uint => mapping(address => Player)) public players; 
     
+    // Tracking players for auto-payout
+    mapping(uint => mapping(uint => address[])) public teamMembers; // gameId => teamId => addresses[]
+
     mapping(uint => uint) public teamHP;   
     mapping(uint => uint) public teamSize; 
     mapping(uint => uint) public teamCards; 
 
-    // Betting / Prizes
-    mapping(uint => uint256) public gamePrizePool;       // gameId => total pot
-    mapping(uint => uint) public gameWinningTeam;        // gameId => winning team ID
-    mapping(uint => uint) public gameWinnerCount;        // gameId => num players on winning team
-    mapping(uint => mapping(address => bool)) public hasClaimed; // gameId => has user claimed
-
+    // Betting
+    mapping(uint => uint256) public gamePrizePool;      
+    
     uint public currentTeamTurn; 
     bool public gameActive;
-    uint public winnerTeam; // Current game winner (temp)
+    uint public winnerTeam;
 
     event GameStarted(uint gameId);
     event PlayerJoined(uint gameId, address player, uint team);
     event CardPlayed(address player, uint team, uint cardId, uint damage);
     event GameEnded(uint winningTeam, uint256 totalPrize);
-    event RewardClaimed(address player, uint256 amount);
+    event PayoutSent(address player, uint256 amount);
 
     constructor() {
         cards[0] = Card(5);
@@ -65,6 +65,9 @@ contract CardGame {
             hasJoined: true
         });
 
+        // Add to tracking arrays
+        teamMembers[gameId][_teamId].push(msg.sender);
+
         teamSize[_teamId]++;
         teamCards[_teamId] += 5; 
         
@@ -87,37 +90,8 @@ contract CardGame {
         emit GameStarted(gameId);
     }
 
-    // Winners call this to get their share!
-    function claimReward(uint _gameId) public {
-        uint winningTeamId = gameWinningTeam[_gameId];
-        require(winningTeamId != 0, "Game not finished or no winner");
-        
-        Player storage p = players[_gameId][msg.sender];
-        require(p.hasJoined, "Did not play in this game");
-        require(p.team == winningTeamId, "You were not on the winning team");
-        require(!hasClaimed[_gameId][msg.sender], "Already claimed");
-
-        // Calculate Share
-        // Total Pool / Number of Winners
-        uint256 totalPool = gamePrizePool[_gameId];
-        uint256 winnerCount = gameWinnerCount[_gameId];
-        require(winnerCount > 0, "No winners?");
-
-        uint256 share = totalPool / winnerCount;
-        
-        hasClaimed[_gameId][msg.sender] = true;
-        
-        payable(msg.sender).transfer(share);
-        emit RewardClaimed(msg.sender, share);
-    }
-
     function resetGame() public {
         require(!gameActive, "Cannot reset while active");
-        // Ensure the current game actually allowed for declaring a winner history before incrementing
-        if (winnerTeam != 0) {
-            // It was already recorded in finishGame
-        }
-
         gameId++; 
         
         gameActive = false;
@@ -177,11 +151,21 @@ contract CardGame {
         gameActive = false;
         winnerTeam = winner;
         
-        // Record History for Claiming
-        gameWinningTeam[gameId] = winner;
-        gameWinnerCount[gameId] = teamSize[winner]; // Total players on winning team
+        // AUTO DISTRIBUTE REWARDS
+        uint256 totalPool = gamePrizePool[gameId];
+        address[] memory winners = teamMembers[gameId][winner];
+        uint256 winnerCount = winners.length;
 
-        emit GameEnded(winner, gamePrizePool[gameId]);
+        if (winnerCount > 0 && totalPool > 0) {
+            uint256 share = totalPool / winnerCount;
+            // Iterate and pay (Limit loop size in production, but fine for hackathon <50 players)
+            for (uint i = 0; i < winnerCount; i++) {
+                payable(winners[i]).transfer(share);
+                emit PayoutSent(winners[i], share);
+            }
+        }
+
+        emit GameEnded(winner, totalPool);
     }
 
     function getMyDeck() public view returns (uint[] memory) {
@@ -199,7 +183,7 @@ contract CardGame {
         uint cards1,
         uint cards2,
         uint currentGameId,
-        uint256 prizePool // New Field
+        uint256 prizePool 
     ) {
         return (
             gameActive,
