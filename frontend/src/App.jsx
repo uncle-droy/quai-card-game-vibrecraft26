@@ -1,33 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { quais } from 'quais';
+import { quais, BrowserProvider, Contract } from 'quais';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from './constants';
-import { Sword, Shield, Activity, Users, Zap, RefreshCw } from 'lucide-react';
+import { Sword, Users, Zap, RefreshCw, ShieldAlert, Skull } from 'lucide-react';
 
-const Card = ({ id, attack, health, onClick, disabled, isOpponent }) => (
+// Team Constants
+const TEAM_RED = 1;
+const TEAM_BLUE = 2;
+
+const Card = ({ id, attack, onClick, disabled }) => (
   <div 
     onClick={() => !disabled && onClick && onClick(id)}
-    className={`relative w-32 h-48 rounded-xl border-2 transition-all duration-300 transform 
-      ${isOpponent ? 'bg-indigo-900 border-indigo-700' : 'bg-slate-800 border-slate-600 hover:scale-105 hover:border-blue-400 cursor-pointer'} 
-      ${disabled ? 'opacity-50 cursor-not-allowed hover:scale-100' : 'shadow-lg hover:shadow-blue-500/20'}
-      flex flex-col items-center justify-between p-4 selected-none`}
+    className={`relative w-36 h-56 rounded-xl border-4 transition-all duration-300 transform 
+      ${disabled ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:scale-105 cursor-pointer bg-slate-800 border-slate-600 hover:border-yellow-400 shadow-xl hover:shadow-yellow-500/20'}
+      flex flex-col items-center justify-between p-4 overflow-hidden group`}
   >
-    <div className="w-full flex justify-between items-center text-xs font-bold text-slate-400">
-      <span>#{id}</span>
-      {isOpponent && <span className="text-red-400">ENEMY</span>}
-    </div>
+    <div className="absolute top-0 right-0 p-2 text-xs font-mono text-slate-500">#{id}</div>
     
-    <div className={`p-3 rounded-full ${isOpponent ? 'bg-red-500/20' : 'bg-blue-500/20'}`}>
-      <Sword size={32} className={isOpponent ? 'text-red-400' : 'text-blue-400'} />
+    <div className="mt-4 p-4 bg-slate-900 rounded-full group-hover:bg-slate-700 transition-colors">
+      <Sword size={48} className="text-slate-200 group-hover:text-yellow-400 transition-colors" />
     </div>
 
-    <div className="w-full flex justify-between space-x-2 mt-2">
-      <div className="flex items-center space-x-1 bg-slate-900/50 px-2 py-1 rounded">
-        <Sword size={14} className="text-yellow-500" />
-        <span className="font-bold text-lg text-yellow-500">{attack}</span>
-      </div>
-      <div className="flex items-center space-x-1 bg-slate-900/50 px-2 py-1 rounded">
-        <Shield size={14} className="text-red-500" />
-        <span className="font-bold text-lg text-red-500">{health}</span>
+    <div className="w-full mt-4">
+      <div className="text-center text-xs text-slate-400 uppercase tracking-widest mb-1">Damage</div>
+      <div className="flex items-center justify-center space-x-2 bg-black/40 py-2 rounded-lg border border-slate-700">
+        <span className="text-3xl font-black text-white">{attack}</span>
       </div>
     </div>
   </div>
@@ -37,129 +33,135 @@ function App() {
   const [wallet, setWallet] = useState(null);
   const [contract, setContract] = useState(null);
   const [account, setAccount] = useState('');
+  const [myTeam, setMyTeam] = useState(0); // 0 = None, 1 = Red, 2 = Blue
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
   // Game State
   const [gameState, setGameState] = useState({
     active: false,
-    currentTurn: '',
-    player1: '0x0000000000000000000000000000000000000000',
-    player2: '0x0000000000000000000000000000000000000000',
-    p1HP: 0,
-    p2HP: 0,
-    winner: '0x0000000000000000000000000000000000000000'
+    turn: 0,
+    winner: 0,
+    hp1: 100,
+    hp2: 100,
+    count1: 0,
+    count2: 0
   });
   
   const [myDeck, setMyDeck] = useState([]);
 
-  // Connect Wallet
   const connectWallet = async () => {
     setLoading(true);
     setError('');
     try {
-      if (!window.pelagus && !window.ethereum) {
-        throw new Error("Pelagus or MetaMask wallet not found! Please install Pelagus.");
-      }
-
-      // Use Pelagus if available, otherwise fallback
-      const provider = new quais.BrowserProvider(window.pelagus || window.ethereum);
+      if (!window.pelagus && !window.ethereum) throw new Error("Install Pelagus Wallet!");
       
-      // Request accounts
+      const provider = new BrowserProvider(window.pelagus || window.ethereum);
       await provider.send("quai_requestAccounts", []);
       const signer = await provider.getSigner();
       const userAddress = await signer.getAddress();
-      
-      console.log("Connected:", userAddress);
-      
-      const gameContract = new quais.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+      const gameContract = new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
       
       setWallet(signer);
       setAccount(userAddress);
       setContract(gameContract);
       
-      // Initial fetch
-      fetchGameState(gameContract, userAddress);
+      // Determine my team
+      try {
+        const player = await gameContract.players(userAddress);
+        // player struct: [deck[], team, hasJoined]
+        // Ethers result array: [deck, team, hasJoined] or object depending on version
+        // Let's assume array access for safety or property if object
+        if (player.hasJoined) {
+          setMyTeam(Number(player.team));
+        }
+      } catch (e) { console.log("Player check failed or not joined", e) }
+
+      fetchGameState(gameContract);
 
     } catch (err) {
       console.error(err);
-      setError(err.message || "Failed to connect wallet");
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch Game State
-  const fetchGameState = async (gameContract, userAddr) => {
+  const fetchGameState = async (gameContract = contract) => {
     if (!gameContract) return;
-    
     try {
-      const status = await gameContract.getGameStatus();
-      /* 
-         Returns:
-         0: active (bool)
-         1: currentTurn (address)
-         2: winner (address)
-         3: p1HP (uint)
-         4: p2HP (uint)
-         5: p1Cards (uint)
-         6: p2Cards (uint)
-      */
-      
-      const p1 = await gameContract.player1();
-      const p2 = await gameContract.player2();
-
-      setGameState({
+      const status = await gameContract.getGameState();
+      // Returns (active, turn, winner, hp1, hp2, count1, count2, cards1, cards2, gameId)
+      const newState = {
         active: status[0],
-        currentTurn: status[1],
-        winner: status[2],
-        p1HP: Number(status[3]),
-        p2HP: Number(status[4]),
-        player1: p1,
-        player2: p2
-      });
+        turn: Number(status[1]),
+        winner: Number(status[2]),
+        hp1: Number(status[3]),
+        hp2: Number(status[4]),
+        count1: Number(status[5]),
+        count2: Number(status[6]),
+        cards1: Number(status[7]), // New
+        cards2: Number(status[8]), // New
+      };
+      setGameState(newState);
 
-      // Fetch Deck if player
-      if (userAddr === p1 || userAddr === p2) {
-        const deckIds = await gameContract.getPlayerDeck(userAddr);
-        const deckData = [];
-        
-        for (let i = 0; i < deckIds.length; i++) {
-          const id = deckIds[i];
-          const card = await gameContract.cards(id); // Returns (attack, health)
-          deckData.push({
-            id: Number(id),
-            attack: Number(card[0]),
-            health: Number(card[1]),
-            index: i // Important for playCard(index)
-          });
-        }
-        setMyDeck(deckData);
+      const currentGameId = status[9]; // New
+
+      // Update my team status if needed
+      if (account) {
+         try {
+           // With new gameId logic, we check players[gameId][account]
+           // Since Ethers mapping access with multiple keys might be tricky in simple syntax:
+           // players(arg1) -> usually maps to players[arg1]
+           // players(arg1, arg2) -> players[arg1][arg2]
+           
+           const p = await gameContract.players(currentGameId, account);
+           
+           if (p.hasJoined) {
+             setMyTeam(Number(p.team));
+             // Fetch deck
+             const deckIds = await gameContract.getMyDeck();
+             const newDeck = [];
+             for(let i=0; i<deckIds.length; i++) {
+                const cId = deckIds[i];
+                const card = await gameContract.cards(cId);
+                const attackVal = card.attack !== undefined ? card.attack : card; 
+                newDeck.push({
+                  id: Number(cId),
+                  attack: Number(attackVal),
+                  index: i
+                });
+             }
+             setMyDeck(newDeck);
+           } else {
+             // If not joined THIS gameId, reset local state
+             setMyTeam(0);
+             setMyDeck([]);
+           }
+         } catch(e) { 
+             console.log("Player fetch error or not in game", e);
+         } 
       }
-      
+
     } catch (err) {
-      console.error("Error fetching state:", err);
+      console.error("Fetch Error:", err);
     }
   };
 
-  // Polling loop
   useEffect(() => {
-    if (contract && account) {
-      const interval = setInterval(() => {
-        fetchGameState(contract, account);
-      }, 3000); // Poll every 3 seconds
+    if (contract) {
+      const interval = setInterval(() => fetchGameState(contract), 2000);
       return () => clearInterval(interval);
     }
   }, [contract, account]);
 
-  // Actions
-  const joinGame = async () => {
+  const joinTeam = async (teamId) => {
     if (!contract) return;
     setLoading(true);
     try {
-      const tx = await contract.joinGame({ gasLimit: 5000000 });
+      const tx = await contract.joinTeam(teamId, { gasLimit: 5000000 });
       await tx.wait();
-      fetchGameState(contract, account);
+      window.location.reload(); // Quick refresh to update full state safely
     } catch (err) {
       setError(err.reason || err.message);
     } finally {
@@ -173,7 +175,7 @@ function App() {
     try {
       const tx = await contract.playCard(index, { gasLimit: 5000000 });
       await tx.wait();
-      fetchGameState(contract, account);
+      fetchGameState(contract);
     } catch (err) {
       setError(err.reason || err.message);
     } finally {
@@ -181,217 +183,205 @@ function App() {
     }
   };
 
-  const isPlayer1 = account === gameState.player1;
-  const isPlayer2 = account === gameState.player2;
-  const isMyTurn = gameState.active && gameState.currentTurn === account;
-  const isOpponentTurn = gameState.active && gameState.currentTurn !== account && (isPlayer1 || isPlayer2);
-  
-  // Opponent Data
-  const opponentHP = isPlayer1 ? gameState.p2HP : gameState.p1HP;
-  const opponentAddr = isPlayer1 ? gameState.player2 : gameState.player1;
-  const myHP = isPlayer1 ? gameState.p1HP : gameState.p2HP;
+  const resetGame = async () => {
+    if (!contract) return;
+    setLoading(true);
+    try {
+      const tx = await contract.resetGame({ gasLimit: 5000000 });
+      await tx.wait();
+      window.location.reload();
+    } catch (err) {
+      setError(err.reason || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-  const hasWinner = gameState.winner && gameState.winner !== ZERO_ADDRESS;
+  // derived state
+  const isRedTurn = gameState.turn === TEAM_RED;
+  const isBlueTurn = gameState.turn === TEAM_BLUE;
+  const isMyTurn = (myTeam === TEAM_RED && isRedTurn) || (myTeam === TEAM_BLUE && isBlueTurn);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-game selection:bg-blue-500/30">
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-game selection:bg-yellow-500/30">
       
-      {/* Header */}
-      <header className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg">
-            <Sword size={24} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">
-            Quai Clash
-          </h1>
-        </div>
-
-        <div>
-          {!account ? (
-            <button 
-              onClick={connectWallet}
-              disabled={loading}
-              className="flex items-center space-x-2 px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold transition-all transform hover:scale-105 shadow-lg shadow-blue-500/25 disabled:opacity-50"
-            >
-              <Zap size={18} />
-              <span>{loading ? 'Connecting...' : 'Connect Wallet'}</span>
-            </button>
-          ) : (
-            <div className="flex items-center space-x-4">
-               <div className="px-4 py-1 bg-slate-800 rounded-full border border-slate-700 text-sm font-mono text-blue-300">
-                 {account.substring(0, 6)}...{account.substring(38)}
-               </div>
-               <button onClick={() => fetchGameState(contract, account)} className="p-2 hover:bg-slate-800 rounded-full transition-colors">
-                 <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-               </button>
+      {/* Game Over Overlay */}
+      {gameState.winner > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in duration-500">
+            <div className={`bg-slate-900 border-4 rounded-3xl p-12 text-center shadow-2xl transform scale-100 ${gameState.winner === TEAM_RED ? 'border-red-600 shadow-red-900/50' : 'border-blue-600 shadow-blue-900/50'}`}>
+                <div className="mb-6 animate-bounce">
+                    {gameState.winner === TEAM_RED ? 
+                        <Sword size={80} className="mx-auto text-red-500" /> : 
+                        <ShieldAlert size={80} className="mx-auto text-blue-500" />
+                    }
+                </div>
+                <h2 className={`text-6xl font-black mb-2 uppercase tracking-tighter ${gameState.winner === TEAM_RED ? 'text-red-500' : 'text-blue-500'}`}>
+                    {gameState.winner === TEAM_RED ? 'RED TEAM' : 'BLUE TEAM'}
+                </h2>
+                <h3 className="text-4xl font-extrabold text-white mb-10">
+                    VICTORIOUS
+                </h3>
+                <button 
+                    onClick={resetGame}
+                    className="px-10 py-4 bg-white hover:bg-slate-200 text-black font-black text-xl rounded-full shadow-xl hover:scale-105 transition-transform"
+                >
+                    START NEW WAR
+                </button>
             </div>
-          )}
         </div>
+      )}
+
+      {/* Header */}
+      <header className="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center sticky top-0 z-20 shadow-xl">
+        <div className="flex items-center space-x-2">
+          <div className="p-2 bg-yellow-500 rounded text-black"><Sword size={20} fill="currentColor" /></div>
+          <h1 className="text-xl font-bold tracking-wider">TEAM BATTLE</h1>
+        </div>
+        
+        {account && (
+          <div className="flex items-center space-x-4">
+             <button onClick={resetGame} className="px-3 py-1 bg-red-950 border border-red-600 rounded text-xs text-red-400 font-bold hover:bg-red-900 transition-colors uppercase">Reset War</button>
+             <div className="text-xs font-mono text-slate-500">{account.substring(0,6)}...</div>
+             <button onClick={() => fetchGameState()}><RefreshCw size={16} /></button>
+          </div>
+        )}
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-8 max-w-5xl">
+      <main className="container mx-auto px-4 py-8 max-w-6xl">
         
-        {/* Error Message */}
         {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 flex items-center">
-            <span className="mr-2">⚠️</span> {error}
+            <div className="mb-8 p-4 bg-red-500/10 border border-red-500/50 rounded text-red-200 flex items-center shadow-lg animate-pulse">
+              <ShieldAlert className="mr-3" /> {error}
+            </div>
+        )}
+
+        {/* 1. Connect Wallet */}
+        {!account && (
+          <div className="flex flex-col items-center justify-center py-20">
+             <h2 className="text-4xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-blue-500">
+               CHOOSE YOUR FACTION
+             </h2>
+             <button onClick={connectWallet} className="px-8 py-4 bg-slate-100 text-slate-900 font-black rounded-xl text-xl hover:scale-105 transition-transform flex items-center">
+               <Zap className="mr-2" /> CONNECT WALLET
+             </button>
           </div>
         )}
 
-        {!account ? (
-          /* Landing State */
-          <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-            <h2 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-indigo-200">
-              Decentralized Card Battles
-            </h2>
-            <p className="text-slate-400 text-lg max-w-md">
-              Connect your Pelagus wallet to enter the arena on the Quai Network.
-            </p>
-          </div>
-        ) : (
-          /* Game UI */
-          <div className="space-y-8">
-            
-            {/* Lobby / Status */}
-            {!gameState.active && !hasWinner && (
-              <div className="bg-slate-900/50 p-8 rounded-2xl border border-slate-700 text-center space-y-4">
-                <Users size={48} className="mx-auto text-slate-500" />
-                <h3 className="text-2xl font-bold">Lobby</h3>
-                
-                {gameState.player1 === account || gameState.player2 === account ? (
-                   <div className="text-yellow-400 animate-pulse">Waiting for opponent to join...</div>
-                ) : (
-                  <div>
-                    <p className="text-slate-400 mb-6">Join the game to start battling!</p>
-                    <button 
-                      onClick={joinGame}
-                      disabled={loading}
-                      className="px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all transform hover:scale-105"
-                    >
-                      {loading ? 'Joining...' : 'Join Game Now'}
-                    </button>
-                  </div>
-                )}
-                
-                <div className="flex justify-center space-x-8 mt-4 text-sm text-slate-500">
-                   <div>Player 1: {gameState.player1 === ZERO_ADDRESS ? 'Empty' : (gameState.player1 === account ? 'YOU' : gameState.player1.substring(0,8)+'...')}</div>
-                   <div>Player 2: {gameState.player2 === ZERO_ADDRESS ? 'Empty' : (gameState.player2 === account ? 'YOU' : gameState.player2.substring(0,8)+'...')}</div>
-                </div>
-              </div>
-            )}
-
-            {/* Winner Screen */}
-            {hasWinner && (
-               <div className="bg-gradient-to-br from-yellow-900/40 to-yellow-600/10 p-10 rounded-2xl border border-yellow-500/30 text-center">
-                 <h2 className="text-4xl font-bold text-yellow-400 mb-4">Game Over!</h2>
-                 <div className="text-2xl text-slate-200">
-                   {gameState.winner === account ? '🏆 VICTORY! You won!' : '💀 DEFEAT! Better luck next time.'}
-                 </div>
+        {/* 2. Lobby (Join Team) */}
+        {account && myTeam === 0 && !gameState.winner && (
+           <div className="grid md:grid-cols-2 gap-8 py-12">
+              {/* Red Team */}
+              <div className="bg-red-950/30 border-2 border-red-900/50 rounded-2xl p-8 flex flex-col items-center hover:bg-red-900/40 transition-colors group">
+                 <h3 className="text-3xl font-black text-red-500 mb-2">RED TEAM</h3>
+                 <p className="text-red-300 mb-8">{gameState.count1} Players Joined</p>
                  <button 
-                   onClick={() => window.location.reload()}
-                   className="mt-6 px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold"
+                   onClick={() => joinTeam(TEAM_RED)} 
+                   disabled={loading}
+                   className="mt-auto px-8 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg shadow-lg shadow-red-900/50 w-full"
                  >
-                   Reset UI
+                   {loading ? 'Processing...' : 'JOIN RED'}
                  </button>
+              </div>
+
+              {/* Blue Team */}
+              <div className="bg-blue-950/30 border-2 border-blue-900/50 rounded-2xl p-8 flex flex-col items-center hover:bg-blue-900/40 transition-colors group">
+                 <h3 className="text-3xl font-black text-blue-500 mb-2">BLUE TEAM</h3>
+                 <p className="text-blue-300 mb-8">{gameState.count2} Players Joined</p>
+                 <button 
+                   onClick={() => joinTeam(TEAM_BLUE)} 
+                   disabled={loading}
+                   className="mt-auto px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg shadow-blue-900/50 w-full"
+                 >
+                   {loading ? 'Processing...' : 'JOIN BLUE'}
+                 </button>
+              </div>
+           </div>
+        )}
+
+        {/* 3. Game Board */}
+        {account && (myTeam !== 0 || gameState.active) && (
+          <div className="space-y-12">
+            
+            {/* Scoreboard */}
+            <div className="relative h-24 bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 flex shadow-2xl">
+               {/* Red Bar */}
+               <div className="h-full bg-red-600 transition-all duration-700 flex items-center px-6 relative" style={{ flex: gameState.hp1 }}>
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent to-black/20"></div>
+                  <span className="text-4xl font-black text-white z-10 drop-shadow-md">{gameState.hp1}</span>
                </div>
-            )}
+               
+               {/* Blue Bar */}
+               <div className="h-full bg-blue-600 transition-all duration-700 flex items-center justify-end px-6 relative" style={{ flex: gameState.hp2 }}>
+                  <div className="absolute inset-0 bg-gradient-to-l from-transparent to-black/20"></div>
+                  <span className="text-4xl font-black text-white z-10 drop-shadow-md">{gameState.hp2}</span>
+               </div>
 
-            {/* Battle Arena */}
-           {(gameState.active || hasWinner) && (
-            <div className="relative min-h-[500px] flex flex-col justify-between">
-              
-              {/* Opponent Area (Top) */}
-              <div className="flex flex-col items-center space-y-2 p-4 bg-red-950/20 rounded-xl border border-red-900/30 opacity-80">
-                <div className="flex items-center space-x-2 text-red-200">
-                   <Users size={16} />
-                   <span className="font-bold text-sm">Opponent ({opponentAddr.substring(0,6)}...)</span>
-                </div>
-                
-                {/* Health Bar */}
-                <div className="w-64 h-4 bg-slate-800 rounded-full overflow-hidden border border-slate-700 relative">
-                  <div 
-                    className="h-full bg-red-500 transition-all duration-500" 
-                    style={{width: `${(opponentHP / 30) * 100}%`}} 
-                  ></div>
-                  <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow">
-                    {opponentHP} / 30 HP
-                  </div>
-                </div>
+               {/* VS Badge */}
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 bg-slate-950 rounded-full border-4 border-slate-800 flex items-center justify-center font-black text-slate-500 z-20">
+                 VS
+               </div>
+            </div>
 
-                {/* Opponent Cards (Hidden/Visual) */}
-                <div className="flex space-x-2 mt-4">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="w-20 h-28 bg-indigo-950 border border-indigo-800 rounded-lg flex items-center justify-center">
-                       <span className="text-indigo-800 font-bold">?</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Turn Indicator */}
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-0">
-                {isMyTurn && (
-                   <div className="px-6 py-2 bg-yellow-500/20 border border-yellow-500 text-yellow-500 font-bold rounded-full animate-bounce">
-                     YOUR TURN!
-                   </div>
-                )}
-                {isOpponentTurn && (
-                   <div className="px-6 py-2 bg-slate-800 border border-slate-600 text-slate-400 font-bold rounded-full">
-                     Opponent thinking...
-                   </div>
-                )}
-              </div>
-
-              {/* Player Area (Bottom) */}
-              <div className="flex flex-col items-center space-y-4 p-6 bg-blue-950/20 rounded-xl border border-blue-900/30 mt-8">
-                 
-                 {/* Player Stats */}
-                 <div className="flex items-center space-x-6 w-full max-w-lg justify-between mb-4">
-                    <div className="flex items-center space-x-2 text-blue-200">
-                       <Shield size={20} />
-                       <span className="font-bold">YOU</span>
+            {/* Turn Indicator / Game Message */}
+            <div className="text-center">
+              {gameState.winner > 0 ? (
+                 <div className="animate-bounce">
+                    <h2 className={`text-6xl font-black ${gameState.winner === TEAM_RED ? 'text-red-500' : 'text-blue-500'}`}>
+                      {gameState.winner === TEAM_RED ? 'RED TEAM WINS!' : 'BLUE TEAM WINS!'}
+                    </h2>
+                    <button onClick={() => window.location.reload()} className="mt-8 px-6 py-2 bg-slate-800 rounded text-sm">Play Again</button>
+                 </div>
+              ) : (
+                 <div>
+                    <div className={`inline-block px-8 py-2 rounded-full text-xl font-bold border-2 ${
+                        isRedTurn ? 'bg-red-500/20 border-red-500 text-red-500' : 'bg-blue-500/20 border-blue-500 text-blue-500'
+                    }`}>
+                      {isRedTurn ? "RED TEAM'S TURN" : "BLUE TEAM'S TURN"}
                     </div>
                     
-                    {/* Health Bar */}
-                    <div className="flex-1 mx-4 h-6 bg-slate-800 rounded-full overflow-hidden border border-slate-700 relative shadow-inner">
-                      <div 
-                        className="h-full bg-blue-500 transition-all duration-500" 
-                        style={{width: `${(myHP / 30) * 100}%`}} 
-                      ></div>
-                       <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white drop-shadow">
-                        {myHP} / 30 HP
-                      </div>
-                    </div>
+                    {myTeam !== 0 && (
+                      <p className="mt-4 text-slate-400">
+                        You are on <span className={myTeam === TEAM_RED ? 'text-red-500 font-bold' : 'text-blue-500 font-bold'}>
+                          {myTeam === TEAM_RED ? 'TEAM RED' : 'TEAM BLUE'}
+                        </span>
+                      </p>
+                    )}
                  </div>
+              )}
+            </div>
 
-                 {/* Player Deck */}
-                 <div className="flex flex-wrap justify-center gap-4">
-                    {myDeck.length === 0 ? (
-                      <div className="text-slate-500 italic">deck empty...</div>
-                    ) : (
-                      myDeck.map((card) => (
+            {/* My Hand */}
+            {myTeam !== 0 && !gameState.winner && (
+              <div className="bg-slate-900/50 p-8 rounded-3xl border border-slate-700/50">
+                <h3 className="text-center text-slate-500 mb-8 uppercase tracking-widest font-bold">Your Arsenal</h3>
+                
+                {myDeck.length === 0 ? (
+                   <div className="text-center text-slate-600 italic">You have no cards left. Cheer for your team!</div>
+                ) : (
+                   <div className="flex flex-wrap justify-center gap-6">
+                      {myDeck.map(card => (
                         <Card 
                           key={card.index} 
                           {...card} 
                           onClick={() => playCard(card.index)}
                           disabled={!isMyTurn || loading}
                         />
-                      ))
-                    )}
-                 </div>
-
+                      ))}
+                   </div>
+                )}
+                
+                {!isMyTurn && myDeck.length > 0 && (
+                  <div className="text-center mt-6 text-slate-500 animate-pulse">
+                     Waiting for opponents...
+                  </div>
+                )}
               </div>
-
-            </div>
-           )}
+            )}
 
           </div>
         )}
-      </main>
 
+      </main>
     </div>
   );
 }
