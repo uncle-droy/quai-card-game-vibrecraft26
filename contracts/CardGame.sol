@@ -281,6 +281,16 @@ contract CardGame {
         );
     }
 
+    function abortGame(uint _gameId) public {
+        Game storage g = games[_gameId];
+        require(gamePlayers[_gameId][msg.sender].hasJoined, "Only players can abort");
+        
+        g.active = false;
+        g.winner = 3; // 3 = Aborted/Reset code
+        
+        emit GameEnded(_gameId, 3, 0);
+    }
+
     function gcd(uint a, uint b) internal pure returns (uint) {
         if (b == 0) return a;
         return gcd(b, a % b);

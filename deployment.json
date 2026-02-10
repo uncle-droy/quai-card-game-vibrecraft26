@@ -1,9 +1,9 @@
 {
   "contractName": "CardGame",
-  "address": "0x000Bda1B2aDCe2c5a302503792A9C7Eab50dF4Da",
+  "address": "0x005b5BF1aA2273482e3924CdF759a8dF1601001c",
   "network": "quai-orchard-testnet",
   "zone": "cyprus1",
-  "deployedAt": "2026-02-10T10:34:03.267Z",
-  "transactionHash": "0x00500049f2ca2bb54afefcd02c448ce81b37f49189852000195c796f2c93e44b",
+  "deployedAt": "2026-02-10T10:45:13.232Z",
+  "transactionHash": "0x0066002d9ed3e6fcf5be3943b9bf963760b2f32916332fea3f0d12be12debdbd",
   "ipfsHash": "QmPZ9gcCEpqKTo6aq61g2nXGXhXhy9T79sDkAxXv71f111"
 }

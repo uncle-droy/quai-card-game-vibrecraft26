@@ -226,12 +226,39 @@ function App() {
     }
   };
 
+  const abortGame = async () => {
+    if (!contract || !currentGameId) return;
+    if (!window.confirm("ARE YOU SURE? This will destroy the lobby for everyone!")) return;
+    setLoading(true);
+    try {
+      const tx = await contract.abortGame(currentGameId, { gasLimit: 5000000 });
+      await tx.wait();
+      fetchGameState(contract, account, currentGameId);
+    } catch (err) {
+      if (err.message.includes("Only players")) alert("You must join a team first!");
+      setError(err.reason || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const leaveLobby = () => {
     setCurrentGameId(null);
     setGameState({ ...gameState, active: false, winner: 0 });
     setMyTeam(0);
     setGameIdInput('');
   }
+
+  // Auto-leave if game is aborted
+  useEffect(() => {
+     if (gameState.winner === 3) {
+         const timer = setTimeout(() => {
+             leaveLobby();
+             alert("Lobby was destroyed/reset by a player. Returning to menu...");
+         }, 3000);
+         return () => clearTimeout(timer);
+     }
+  }, [gameState.winner]);
 
   const isRedTurn = gameState.turn === TEAM_RED;
   const isBlueTurn = gameState.turn === TEAM_BLUE;
@@ -329,16 +356,28 @@ function App() {
           <div className="relative p-20 text-center border-y-8 border-white bg-gradient-to-r from-transparent via-slate-900 to-transparent w-full">
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/diagmonds-light.png')] opacity-10"></div>
 
-            <h2 className={`text-9xl font-black mb-4 uppercase tracking-tighter italic drop-shadow-[0_0_50px_currentColor] ${gameState.winner === TEAM_RED ? 'text-red-600' : 'text-blue-600'}`}>
-              {gameState.winner === TEAM_RED ? 'RED WIN' : 'BLUE WIN'}
-            </h2>
-            <h3 className="text-2xl font-mono text-white mb-12 tracking-[1em] uppercase">Domination Complete</h3>
+            {gameState.winner === 3 ? (
+                <>
+                    <ShieldAlert size={80} className="mx-auto text-red-600 animate-pulse mb-8" />
+                    <h2 className="text-8xl font-black mb-4 uppercase tracking-tighter italic text-red-600 drop-shadow-[0_0_50px_red]">
+                        ZONE DESTROYED
+                    </h2>
+                    <h3 className="text-2xl font-mono text-white mb-12 tracking-[1em] uppercase animate-pulse">Evacuating...</h3>
+                </>
+            ) : (
+                <>
+                    <h2 className={`text-9xl font-black mb-4 uppercase tracking-tighter italic drop-shadow-[0_0_50px_currentColor] ${gameState.winner === TEAM_RED ? 'text-red-600' : 'text-blue-600'}`}>
+                        {gameState.winner === TEAM_RED ? 'RED WIN' : 'BLUE WIN'}
+                    </h2>
+                    <h3 className="text-2xl font-mono text-white mb-12 tracking-[1em] uppercase">Domination Complete</h3>
 
-            {myTeam === gameState.winner && (
-              <div className="mb-12 inline-flex items-center space-x-4 px-8 py-4 bg-green-500/20 border border-green-500 text-green-400 rounded-full animate-pulse">
-                <Award size={24} />
-                <span className="font-bold font-mono">BOUNTY TRANSFERRED TO WALLET</span>
-              </div>
+                    {myTeam === gameState.winner && (
+                    <div className="mb-12 inline-flex items-center space-x-4 px-8 py-4 bg-green-500/20 border border-green-500 text-green-400 rounded-full animate-pulse">
+                        <Award size={24} /> 
+                        <span className="font-bold font-mono">BOUNTY TRANSFERRED TO WALLET</span>
+                    </div>
+                    )}
+                </>
             )}
 
             <div>
@@ -380,6 +419,12 @@ function App() {
 
         <div className="flex items-center space-x-4">
           {account && <div className="text-xs font-mono text-slate-600 hidden sm:block">{account.substring(0, 6)}...</div>}
+           <button 
+              onClick={abortGame} 
+              className="text-red-900 hover:text-red-500 border border-red-900/50 hover:border-red-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest transition-colors mr-2"
+           >
+              RESET
+           </button>
           <button onClick={() => fetchGameState(contract, account, currentGameId)} className="hover:rotate-180 transition-transform duration-500 text-slate-500 hover:text-white">
             <RefreshCw size={20} />
           </button>
