@@ -363,22 +363,13 @@ contract CardGame {
         g.cards2 = _countTeamCards(_gameId, 2);
         
         uint oppCards = (opponentTeam == 1) ? g.cards1 : g.cards2;
-        uint myCards = (p.team == 1) ? g.cards1 : g.cards2;
+
 
         if (oppCards == 0) {
-            if (myCards > 0) {
-                finishGame(_gameId, p.team);
-                return;
-            } else {
-                if(p.team == 1) {
-                     if (g.ap1 >= g.ap2) finishGame(_gameId, 1);
-                     else finishGame(_gameId, 2);
-                } else {
-                     if (g.ap2 >= g.ap1) finishGame(_gameId, 2);
-                     else finishGame(_gameId, 1);
-                }
-                return;
-            }
+             if (g.ap1 > g.ap2) finishGame(_gameId, 1);
+             else if (g.ap2 > g.ap1) finishGame(_gameId, 2);
+             else finishGame(_gameId, 4); // Draw
+             return;
         }
 
         g.currentTurn = opponentTeam;
@@ -390,16 +381,30 @@ contract CardGame {
         g.winner = _winner;
         
         // Distribute Rewards
-        address[] memory winners = gameTeamMembers[_gameId][_winner];
-        uint loserTeam = (_winner == 1) ? 2 : 1;
-        address[] memory losers = gameTeamMembers[_gameId][loserTeam];
-        
-        for (uint i = 0; i < winners.length; i++) {
-            _addCredits(winners[i], WIN_REWARD);
-        }
-        
-        for (uint i = 0; i < losers.length; i++) {
-            _addCredits(losers[i], LOSS_REWARD);
+        if (_winner == 4) {
+            // Draw: Everyone gets (WIN + LOSS) / 2 = (50+15)/2 = 32
+            uint drawReward = (WIN_REWARD + LOSS_REWARD) / 2;
+            
+            address[] memory t1 = gameTeamMembers[_gameId][1];
+            address[] memory t2 = gameTeamMembers[_gameId][2];
+            
+            for(uint i=0; i<t1.length; i++) _addCredits(t1[i], drawReward);
+            for(uint i=0; i<t2.length; i++) _addCredits(t2[i], drawReward);
+            
+        } else if (_winner == 3) {
+            // Aborted: No rewards? Or maybe refund? For now, no rewards.
+        } else {
+            address[] memory winners = gameTeamMembers[_gameId][_winner];
+            uint loserTeam = (_winner == 1) ? 2 : 1;
+            address[] memory losers = gameTeamMembers[_gameId][loserTeam];
+            
+            for (uint i = 0; i < winners.length; i++) {
+                _addCredits(winners[i], WIN_REWARD);
+            }
+            
+            for (uint i = 0; i < losers.length; i++) {
+                _addCredits(losers[i], LOSS_REWARD);
+            }
         }
 
         emit GameEnded(_gameId, _winner);

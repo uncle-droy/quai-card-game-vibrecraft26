@@ -115,7 +115,15 @@ function App() {
       // Load Credits
       try {
           // Check starter
-          await (await gameContract.checkStarterCredits()).wait();
+          const claimed = await gameContract.hasClaimedStarter(userAddress);
+          if (!claimed) {
+               try {
+                   const tx = await gameContract.checkStarterCredits();
+                   await tx.wait();
+               } catch (e) {
+                   console.error("Starter credits claim failed/rejected", e);
+               }
+          }
           const bal = await gameContract.getCredits(userAddress);
           setCredits(Number(bal));
       } catch (e) {
@@ -318,7 +326,19 @@ function App() {
 
   const leaveLobby = () => {
     setCurrentGameId(null);
-    setGameState({ ...gameState, active: false, winner: 0 });
+    setGameState({
+        active: false,
+        turn: 0,
+        winner: 0,
+        ap1: 0,
+        ap2: 0,
+        count1: 0,
+        count2: 0,
+        cards1: 0,
+        cards2: 0,
+        gameId: 0,
+        prizePool: "0"
+    });
     setMyTeam(0);
     setGameIdInput('');
     setLoading(false);
@@ -442,11 +462,33 @@ function App() {
                         ZONE DESTROYED
                     </h2>
                 </>
+            ) : gameState.winner === 4 ? (
+                <>
+                    <Skull size={80} className="mx-auto text-yellow-500 animate-bounce mb-8" />
+                    <h2 className="text-9xl font-black mb-4 uppercase tracking-tighter italic text-yellow-500 drop-shadow-[0_0_50px_yellow]">
+                        STALEMATE
+                    </h2>
+                    <div className="flex justify-center items-center space-x-8 mb-8">
+                        <div className="text-4xl font-black text-red-600">{gameState.ap1}</div>
+                        <div className="text-xl text-slate-500 font-mono">VS</div>
+                        <div className="text-4xl font-black text-blue-600">{gameState.ap2}</div>
+                    </div>
+                    <div className="mb-12 inline-flex flex-col items-center space-y-2 px-8 py-4 bg-yellow-500/20 border border-yellow-500 text-yellow-400 rounded-xl animate-pulse">
+                        <Coins size={40} />
+                        <span className="font-bold font-mono text-2xl">POT SPLIT</span>
+                    </div>
+                </>
             ) : (
                 <>
                     <h2 className={`text-9xl font-black mb-4 uppercase tracking-tighter italic drop-shadow-[0_0_50px_currentColor] ${gameState.winner === TEAM_RED ? 'text-red-600' : 'text-blue-600'}`}>
                         {gameState.winner === TEAM_RED ? 'RED WIN' : 'BLUE WIN'}
                     </h2>
+                    
+                    <div className="flex justify-center items-center space-x-8 mb-12">
+                        <div className={`text-6xl font-black italic ${gameState.winner === TEAM_RED ? 'text-white' : 'text-slate-600'}`}>{gameState.ap1}</div>
+                        <div className="text-2xl text-slate-500 font-mono">VS</div>
+                        <div className={`text-6xl font-black italic ${gameState.winner === TEAM_BLUE ? 'text-white' : 'text-slate-600'}`}>{gameState.ap2}</div>
+                    </div>
                     
                     {myTeam === gameState.winner ? (
                     <div className="mb-12 inline-flex flex-col items-center space-y-2 px-8 py-4 bg-green-500/20 border border-green-500 text-green-400 rounded-xl animate-pulse">
@@ -464,9 +506,9 @@ function App() {
             <div>
               <button
                 onClick={leaveLobby}
-                className="px-12 py-4 bg-white text-black hover:bg-slate-200 font-black text-xl uppercase tracking-widest transition-colors"
+                className="px-12 py-4 bg-white text-black hover:bg-slate-200 font-black text-xl uppercase tracking-widest transition-colors z-50 relative pointer-events-auto cursor-pointer"
               >
-                Exit Battle
+                EXIT BATTLE
               </button>
             </div>
           </div>
