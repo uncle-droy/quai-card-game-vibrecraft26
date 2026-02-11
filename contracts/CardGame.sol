@@ -43,6 +43,7 @@ contract CardGame {
     uint public constant COST_FIREWALL = 150;
     uint public constant COST_CRIT = 125;
     uint public constant COST_EMP = 150;
+    uint public constant COST_SWAP = 300;
 
     // State
     uint public nextGameId; 
@@ -227,6 +228,54 @@ contract CardGame {
                 if(g.ap2 >= TARGET_SCORE) { finishGame(_gameId, 2); return; }
             }
             emit AbilityPurchased(_gameId, msg.sender, "EMP_BURST");
+        }
+        else if (_abilityId == 5) {
+            // SWAP.EXE (Exchange Weakest <> Strongest)
+            _deductCredits(msg.sender, COST_SWAP);
+
+            uint minAtk = 999;
+            uint myWeakestIdx = 0;
+            // Find my weakest
+            for(uint i=0; i<p.deck.length; i++) {
+                uint atk = cards[p.deck[i]].attack;
+                if(atk < minAtk) {
+                    minAtk = atk;
+                    myWeakestIdx = i;
+                }
+            }
+            
+            // Find enemy strongest
+            uint maxAtk = 0;
+            address bestEnemyAddr;
+            uint bestEnemyCardIdx;
+            
+            uint oppTeam = (p.team == 1) ? 2 : 1;
+            address[] memory opps = gameTeamMembers[_gameId][oppTeam];
+            
+            for(uint i=0; i<opps.length; i++) {
+                Player storage ep = gamePlayers[_gameId][opps[i]];
+                if (ep.deck.length > 0) {
+                    for(uint j=0; j<ep.deck.length; j++) {
+                        uint eatk = cards[ep.deck[j]].attack;
+                        if(eatk > maxAtk) {
+                            maxAtk = eatk;
+                            bestEnemyAddr = opps[i];
+                            bestEnemyCardIdx = j;
+                        }
+                    }
+                }
+            }
+            
+            require(maxAtk > 0, "No enemy cards to swap");
+            
+            // Swap
+            uint myCard = p.deck[myWeakestIdx];
+            uint enemyCard = gamePlayers[_gameId][bestEnemyAddr].deck[bestEnemyCardIdx];
+            
+            p.deck[myWeakestIdx] = enemyCard;
+            gamePlayers[_gameId][bestEnemyAddr].deck[bestEnemyCardIdx] = myCard;
+            
+            emit AbilityPurchased(_gameId, msg.sender, "SWAP_EXE");
         }
     }
 

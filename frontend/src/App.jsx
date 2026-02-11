@@ -2,7 +2,30 @@ import React, { useState, useEffect } from 'react';
 import { quais, BrowserProvider, Contract } from 'quais';
 import { parseEther, formatEther } from 'ethers';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from './constants';
-import { Sword, Users, Zap, RefreshCw, ShieldAlert, Skull, Coins, Award, Play, Home, Plus, Flame, Target, Cpu, ShoppingCart, Shield, Crosshair, Radio } from 'lucide-react';
+import { Sword, Users, Zap, RefreshCw, ShieldAlert, Skull, Coins, Award, Play, Home, Plus, Flame, Target, Cpu, ShoppingCart, Shield, Crosshair, Radio, ArrowLeftRight } from 'lucide-react';
+
+// ...
+
+  const leaveLobby = () => {
+    setCurrentGameId(null);
+    setGameState({
+        active: false,
+        turn: 0,
+        winner: 0,
+        ap1: 0,
+        ap2: 0,
+        count1: 0,
+        count2: 0,
+        cards1: 0,
+        cards2: 0,
+        gameId: 0,
+        prizePool: "0"
+    });
+    setMyTeam(0);
+    setGameIdInput('');
+    setLoading(false);
+    setError('');
+  }
 
 const TEAM_RED = 1;
 const TEAM_BLUE = 2;
@@ -72,6 +95,7 @@ function App() {
   });
 
   const [myDeck, setMyDeck] = useState([]);
+  const [isMarketOpen, setIsMarketOpen] = useState(true);
 
   const connectWallet = async () => {
     setLoading(true);
@@ -456,6 +480,9 @@ function App() {
             <div className="p-2 bg-slate-800 group-hover:bg-red-600 transition-colors rounded-lg mr-3">
               <Home size={20} className="text-slate-400 group-hover:text-white" />
             </div>
+            <span className="text-xs font-mono font-bold text-slate-500 group-hover:text-red-500 transition-colors uppercase tracking-widest hidden sm:block">
+              LEAVE ZONE
+            </span>
           </button>
 
           <div className="h-8 w-px bg-slate-800 mx-4"></div>
@@ -464,6 +491,13 @@ function App() {
             <span className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Zone Code</span>
             <button onClick={() => {navigator.clipboard.writeText(gameState.gameId); alert("ID Copied!")}} className="text-xl font-black text-white italic leading-none tracking-widest hover:text-yellow-500">#{gameState.gameId}</button>
           </div>
+
+          {/* TEAM BADGE */}
+          {myTeam !== 0 && (
+             <div className={`px-3 py-1 rounded font-black italic tracking-tighter border ${myTeam === TEAM_RED ? 'bg-red-900/20 border-red-600 text-red-500' : 'bg-blue-900/20 border-blue-600 text-blue-500'}`}>
+                 {myTeam === TEAM_RED ? 'RED TEAM' : 'BLUE TEAM'}
+             </div>
+          )}
         </div>
 
         <div className="flex items-center space-x-3 bg-black/50 px-6 py-2 rounded-full border border-slate-800">
@@ -472,10 +506,11 @@ function App() {
         </div>
 
         <div className="flex items-center space-x-4">
+           {/* Shop Indicator */}
            {!playerState.hasPlayed ? (
-               <div className="text-xs bg-green-900/50 text-green-400 px-3 py-1 rounded border border-green-900 animate-pulse font-mono">
-                   SHOP OPEN
-               </div>
+               <button onClick={() => setIsMarketOpen(!isMarketOpen)} className="text-xs bg-green-900/50 text-green-400 px-3 py-1 rounded border border-green-900 animate-pulse font-mono hover:bg-green-900">
+                   {isMarketOpen ? 'CLOSE SHOP' : 'OPEN SHOP'}
+               </button>
            ) : (
                <div className="text-xs text-slate-600 px-3 py-1 font-mono">
                    SHOP LOCKED
@@ -494,7 +529,24 @@ function App() {
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-8 max-w-7xl">
+      {/* ACTIVE BUFFS BAR (Fixed Bottom) */}
+      {(playerState.dmgMult > 100 || playerState.critChance > 0) && (
+          <div className="fixed bottom-0 inset-x-0 bg-slate-900/90 border-t border-slate-700 p-2 z-40 flex justify-center space-x-8 backdrop-blur-md">
+              <span className="text-slate-400 text-xs font-mono uppercase tracking-widest self-center">Active Systems:</span>
+              {playerState.dmgMult > 100 && (
+                  <div className="flex items-center text-yellow-500 font-bold font-mono text-sm">
+                      <Cpu size={16} className="mr-2"/> NEURAL OVERCLOCK (+30% DMG)
+                  </div>
+              )}
+              {playerState.critChance > 0 && (
+                  <div className="flex items-center text-red-500 font-bold font-mono text-sm">
+                      <Crosshair size={16} className="mr-2"/> CRIT.EXE ACTIVE (20% CRIT)
+                  </div>
+              )}
+          </div>
+      )}
+
+      <main className="container mx-auto px-4 py-8 max-w-7xl pb-24">
 
         {/* SCOREBOARD */}
         {gameState.active && (
@@ -589,15 +641,18 @@ function App() {
         )}
 
         {/* TACTICAL SHOP */}
-        {gameState.active && !playerState.hasPlayed && !gameState.winner && (
+        {gameState.active && !playerState.hasPlayed && !gameState.winner && isMarketOpen && (
             <div className="mb-12 border border-slate-800 bg-slate-900/50 p-6 rounded-xl animate-in fade-in slide-in-from-top-4">
                 <div className="flex items-center gap-3 mb-6">
                     <ShoppingCart className="text-yellow-500" />
                     <h3 className="text-xl font-black italic text-white">TACTICAL BLACK MARKET</h3>
-                    <span className="text-xs text-slate-500 font-mono uppercase ml-auto">Injects code mid-execution</span>
+                    <div className="ml-auto flex items-center space-x-4">
+                        <span className="text-xs text-slate-500 font-mono uppercase">Injects code mid-execution</span>
+                        <button onClick={() => setIsMarketOpen(false)} className="text-xs text-slate-400 hover:text-white underline">HIDE</button>
+                    </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     {/* Item 1 */}
                     <button onClick={() => purchaseAbility(1)} disabled={playerState.dmgMult > 100 || credits < 100} className="group text-left p-4 bg-black border border-slate-800 hover:border-yellow-500 transition-colors relative overflow-hidden disabled:opacity-50 disabled:grayscale">
                         <div className="absolute inset-0 bg-yellow-500/5 group-hover:bg-yellow-500/10 transition-colors"></div>
@@ -605,7 +660,7 @@ function App() {
                              <Cpu className="text-yellow-500" />
                              <span className="text-xs font-mono font-bold text-yellow-500">100 CR</span>
                         </div>
-                        <div className="font-bold text-white mb-1">NEURAL OVERCLOCK</div>
+                        <div className="font-bold text-white mb-1">OVERCLOCK</div>
                         <div className="text-xs text-slate-400">+30% All Dmg</div>
                     </button>
                     
@@ -616,7 +671,7 @@ function App() {
                              <Shield className="text-blue-500" />
                              <span className="text-xs font-mono font-bold text-blue-500">150 CR</span>
                         </div>
-                        <div className="font-bold text-white mb-1">FIREWALL EXP.</div>
+                        <div className="font-bold text-white mb-1">FIREWALL</div>
                         <div className="text-xs text-slate-400">+2 Extra Cards</div>
                     </button>
                     
@@ -628,7 +683,7 @@ function App() {
                              <span className="text-xs font-mono font-bold text-red-500">125 CR</span>
                         </div>
                         <div className="font-bold text-white mb-1">CRIT.EXE</div>
-                        <div className="text-xs text-slate-400">20% Chance 2x Dmg</div>
+                        <div className="text-xs text-slate-400">20% Chance 2x</div>
                     </button>
                     
                     {/* Item 4 */}
@@ -640,6 +695,17 @@ function App() {
                         </div>
                         <div className="font-bold text-white mb-1">EMP BURST</div>
                         <div className="text-xs text-slate-400">10 Instant Dmg</div>
+                    </button>
+
+                    {/* Item 5 */}
+                    <button onClick={() => purchaseAbility(5)} disabled={credits < 300} className="group text-left p-4 bg-black border border-slate-800 hover:border-emerald-500 transition-colors relative overflow-hidden disabled:opacity-50 disabled:grayscale">
+                         <div className="absolute inset-0 bg-emerald-500/5 group-hover:bg-emerald-500/10 transition-colors"></div>
+                         <div className="flex justify-between items-start mb-2">
+                             <ArrowLeftRight className="text-emerald-500" />
+                             <span className="text-xs font-mono font-bold text-emerald-500">300 CR</span>
+                        </div>
+                        <div className="font-bold text-white mb-1">DATA SWAP</div>
+                        <div className="text-xs text-slate-400">Mine:Min ↔ Enemy:Max</div>
                     </button>
                 </div>
             </div>
