@@ -247,6 +247,8 @@ function App() {
     setGameState({ ...gameState, active: false, winner: 0 });
     setMyTeam(0);
     setGameIdInput('');
+    setLoading(false);
+    setError('');
   }
 
   // Auto-leave if game is aborted
@@ -489,6 +491,30 @@ function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* STATUS BAR */}
+        {gameState.active && (
+            <div className="mb-12 flex justify-center animate-in fade-in duration-500">
+                {loading ? (
+                    <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-500 px-8 py-4 font-mono font-bold uppercase tracking-widest animate-pulse flex items-center shadow-[0_0_20px_rgba(234,179,8,0.2)]">
+                        <RefreshCw className="animate-spin mr-4" size={24}/>
+                        PROCESSING TRANSACTION...
+                    </div>
+                ) : (
+                    <div className={`px-10 py-4 font-mono font-bold uppercase tracking-widest border flex items-center shadow-2xl transition-all duration-500
+                        ${isMyTurn ? 'bg-green-500/20 border-green-500 text-green-400 scale-105 shadow-[0_0_30px_rgba(74,222,128,0.2)]' : 
+                          isRedTurn ? 'bg-red-950/40 border-red-900 text-red-600 opacity-80' : 
+                          'bg-blue-950/40 border-blue-900 text-blue-600 opacity-80'}
+                    `}>
+                        {isMyTurn ? (
+                             <>YOUR TURN - DEPLOY CARDS</>
+                        ) : (
+                             <>{isRedTurn ? 'RED' : 'BLUE'} FACTION CHOOSING...</>
+                        )}
+                    </div>
+                )}
+            </div>
         )}
 
         {/* TEAM SELECTION */}
