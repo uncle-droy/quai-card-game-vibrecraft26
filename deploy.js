@@ -18,11 +18,17 @@ const RPC_URLS = {
 
 async function main() {
     // Load configuration
-    const privateKey = process.env.PRIVATE_KEY;
     const zone = process.env.ZONE || 'cyprus1';
+    let privateKey = process.env.PRIVATE_KEY;
+
+    // Fallback to Zone PK
+    if (!privateKey) {
+        if (zone === 'cyprus1') privateKey = process.env.CYPRUS1_PK;
+        if (zone === 'cyprus2') privateKey = process.env.CYPRUS2_PK;
+    }
     
     if (!privateKey) {
-        console.error('❌ Error: PRIVATE_KEY not set in .env file');
+        console.error('❌ Error: PRIVATE_KEY or zone PK not set in .env file');
         process.exit(1);
     }
     

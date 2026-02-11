@@ -2,23 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { quais, BrowserProvider, Contract } from 'quais';
 import { parseEther, formatEther } from 'ethers';
 import { CONTRACT_ADDRESS, CONTRACT_ABI } from './constants';
-import { Sword, Users, Zap, RefreshCw, ShieldAlert, Skull, Coins, Award, Play, Home, Plus, Flame, Target } from 'lucide-react';
+import { Sword, Users, Zap, RefreshCw, ShieldAlert, Skull, Coins, Award, Play, Home, Plus, Flame, Target, Cpu, ShoppingCart, Shield, Crosshair, Radio } from 'lucide-react';
 
 const TEAM_RED = 1;
 const TEAM_BLUE = 2;
 
-const Card = ({ id, attack, onClick, disabled }) => (
+const Card = ({ id, attack, onClick, disabled, isOverclocked }) => (
   <div
     onClick={() => !disabled && onClick && onClick(id)}
     className={`relative group w-40 h-64 rounded-xl transition-all duration-300 transform 
       ${disabled ? 'opacity-50 grayscale cursor-not-allowed scale-95' : 'hover:scale-105 cursor-pointer hover:-translate-y-2'}
-      border-2 border-slate-700 bg-slate-900 overflow-hidden shadow-2xl hover:shadow-[0_0_30px_rgba(234,179,8,0.3)]
+      border-2 ${isOverclocked ? 'border-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.5)]' : 'border-slate-700'} 
+      bg-slate-900 overflow-hidden shadow-2xl hover:shadow-[0_0_30px_rgba(234,179,8,0.3)]
     `}
   >
     {/* Holo Effect Overlay */}
     <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-20 transition-opacity pointer-events-none z-10"></div>
 
     <div className="absolute top-2 right-2 text-[10px] font-mono text-slate-500">SR-{id}</div>
+    {isOverclocked && <div className="absolute top-2 left-2 text-[10px] font-mono text-yellow-500 font-bold animate-pulse">OVERCLOCKED</div>}
 
     <div className="h-2/3 flex items-center justify-center bg-gradient-to-b from-slate-800 to-slate-900 border-b border-slate-700 relative overflow-hidden">
       <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10"></div>
@@ -28,7 +30,9 @@ const Card = ({ id, attack, onClick, disabled }) => (
     <div className="h-1/3 flex flex-col items-center justify-center bg-slate-950 p-2 relative">
       <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Impact</div>
       <div className="flex items-center space-x-2">
-        <span className="text-4xl font-black text-white slashed-zero">{attack}</span>
+        <span className={`text-4xl font-black slashed-zero ${isOverclocked ? 'text-yellow-400' : 'text-white'}`}>
+             {isOverclocked ? Math.floor(attack * 1.3) : attack}
+        </span>
         <Target size={16} className="text-red-500 animate-pulse" />
       </div>
     </div>
@@ -39,6 +43,8 @@ function App() {
   const [wallet, setWallet] = useState(null);
   const [contract, setContract] = useState(null);
   const [account, setAccount] = useState('');
+  const [credits, setCredits] = useState(0);
+  
   const [myTeam, setMyTeam] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -50,14 +56,19 @@ function App() {
     active: false,
     turn: 0,
     winner: 0,
-    ap1: 0, // Annihilation Points (Start 0, Target 100)
+    ap1: 0,
     ap2: 0,
     count1: 0,
     count2: 0,
     cards1: 0,
     cards2: 0,
-    gameId: 0,
-    prizePool: "0"
+    gameId: 0
+  });
+
+  const [playerState, setPlayerState] = useState({
+      hasPlayed: false,
+      dmgMult: 100,
+      critChance: 0
   });
 
   const [myDeck, setMyDeck] = useState([]);
@@ -76,6 +87,17 @@ function App() {
       setWallet(signer);
       setAccount(userAddress);
       setContract(gameContract);
+      
+      // Load Credits
+      try {
+          // Check starter
+          await (await gameContract.checkStarterCredits()).wait();
+          const bal = await gameContract.getCredits(userAddress);
+          setCredits(Number(bal));
+      } catch (e) {
+          console.error("Credit fetch error", e);
+      }
+      
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -104,6 +126,8 @@ function App() {
       }
       if (newGameId) {
         setCurrentGameId(newGameId);
+        navigator.clipboard.writeText(newGameId.toString());
+        alert(`Game Created: ${newGameId}\nCOPIED TO CLIPBOARD!`);
         fetchGameState(contract, account, newGameId);
       } else {
         alert("Game Created. Check explorer for ID.");
@@ -125,8 +149,8 @@ function App() {
   const fetchGameState = async (gameContract = contract, userAddr = account, gId = currentGameId) => {
     if (!gameContract || !gId) return;
     try {
+      // 1. Get Game State
       const status = await gameContract.getGameState(gId);
-
       if (Number(status[9]) === 0) {
         setError("Invalid Game ID");
         setCurrentGameId(null);
@@ -137,22 +161,34 @@ function App() {
         active: status[0],
         turn: Number(status[1]),
         winner: Number(status[2]),
-        ap1: Number(status[3]), // AP!
-        ap2: Number(status[4]), // AP!
+        ap1: Number(status[3]),
+        ap2: Number(status[4]),
         count1: Number(status[5]),
         count2: Number(status[6]),
         cards1: Number(status[7]),
         cards2: Number(status[8]),
-        gameId: Number(status[9]),
-        prizePool: status[10] ? formatEther(status[10]) : "0"
+        gameId: Number(status[9])
       };
       setGameState(newState);
 
+      // 2. Get Player State
       if (userAddr) {
+        // Credits Update
+        const creds = await gameContract.getCredits(userAddr);
+        setCredits(Number(creds));
+          
         try {
           const p = await gameContract.getPlayer(gId, userAddr);
+          // deck, team, hasJoined, hasPlayed, dmgMult, critChance
           if (p[2]) {
             setMyTeam(Number(p[1]));
+            
+            setPlayerState({
+                hasPlayed: p[3],
+                dmgMult: Number(p[4]),
+                critChance: Number(p[5])
+            });
+
             const deckIds = p[0];
             const newDeck = [];
             for (let i = 0; i < deckIds.length; i++) {
@@ -188,7 +224,7 @@ function App() {
     if (!contract || !currentGameId) return;
     setLoading(true);
     try {
-      const tx = await contract.joinTeam(currentGameId, teamId, { value: parseEther("0.0067"), gasLimit: 5000000 });
+      const tx = await contract.joinTeam(currentGameId, teamId, { gasLimit: 5000000 });
       await tx.wait();
       fetchGameState(contract, account, currentGameId);
     } catch (err) {
@@ -211,6 +247,21 @@ function App() {
       setLoading(false);
     }
   };
+  
+  const purchaseAbility = async (abilityId) => {
+      if (!contract || !currentGameId) return;
+      setLoading(true);
+      try {
+          const tx = await contract.purchaseAbility(currentGameId, abilityId, { gasLimit: 5000000 });
+          await tx.wait();
+          fetchGameState(contract, account, currentGameId);
+          alert("MODIFIER INSTALLED SUCCESSFULLY");
+      } catch(err) {
+          setError(err.reason || err.message);
+      } finally {
+          setLoading(false);
+      }
+  }
 
   const playCard = async (index) => {
     if (!contract || !currentGameId) return;
@@ -228,14 +279,13 @@ function App() {
 
   const abortGame = async () => {
     if (!contract || !currentGameId) return;
-    if (!window.confirm("ARE YOU SURE? This will destroy the lobby for everyone!")) return;
+    if (!window.confirm("RESET LOBBY?")) return;
     setLoading(true);
     try {
       const tx = await contract.abortGame(currentGameId, { gasLimit: 5000000 });
       await tx.wait();
       fetchGameState(contract, account, currentGameId);
     } catch (err) {
-      if (err.message.includes("Only players")) alert("You must join a team first!");
       setError(err.reason || err.message);
     } finally {
       setLoading(false);
@@ -251,12 +301,11 @@ function App() {
     setError('');
   }
 
-  // Auto-leave if game is aborted
   useEffect(() => {
      if (gameState.winner === 3) {
          const timer = setTimeout(() => {
              leaveLobby();
-             alert("Lobby was destroyed/reset by a player. Returning to menu...");
+             alert("Lobby Reset.");
          }, 3000);
          return () => clearTimeout(timer);
      }
@@ -265,7 +314,6 @@ function App() {
   const isRedTurn = gameState.turn === TEAM_RED;
   const isBlueTurn = gameState.turn === TEAM_BLUE;
   const isMyTurn = (myTeam === TEAM_RED && isRedTurn) || (myTeam === TEAM_BLUE && isBlueTurn);
-  const targetAP = 100;
 
   // LANDING
   if (!account) {
@@ -277,7 +325,7 @@ function App() {
           <h1 className="text-8xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-yellow-500 to-blue-500 drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]">
             NEON WAR
           </h1>
-          <p className="text-slate-400 text-xl tracking-widest uppercase font-mono">Atomic Card Battles on Quai Network</p>
+          <p className="text-slate-400 text-xl tracking-widest uppercase font-mono">Tactical Card Warfare</p>
 
           <button onClick={connectWallet} className="group relative px-12 py-5 bg-white text-black font-black text-2xl rounded-none skew-x-[-10deg] hover:bg-yellow-400 transition-colors">
             <div className="skew-x-[10deg] flex items-center">
@@ -299,8 +347,13 @@ function App() {
 
         <header className="flex justify-between items-center mb-20 relative z-10">
           <h1 className="text-3xl font-black italic tracking-tighter flex items-center gap-2 text-white"><Sword className="text-yellow-500" /> NEON WAR</h1>
-          <div className="font-mono text-emerald-400 text-sm border border-emerald-900 bg-emerald-950/30 px-4 py-2 rounded">
-            ID: {account.substring(0, 8)}...
+          <div className="flex gap-4">
+               <div className="font-mono text-yellow-500 font-bold border border-yellow-900 bg-yellow-950/30 px-4 py-2 rounded flex items-center gap-2">
+                 <Coins size={16}/> {credits} CR
+               </div>
+               <div className="font-mono text-emerald-400 text-sm border border-emerald-900 bg-emerald-950/30 px-4 py-2 rounded">
+                 ID: {account.substring(0, 8)}...
+               </div>
           </div>
         </header>
 
@@ -310,7 +363,7 @@ function App() {
             <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500 scale-x-0 group-hover:scale-x-100 transition-transform origin-left"></div>
             <Flame size={64} className="text-slate-700 group-hover:text-yellow-500 mb-6 transition-colors" />
             <h2 className="text-4xl font-black mb-4 uppercase italic">Deploy Lobby</h2>
-            <p className="text-slate-500 mb-8 font-mono text-sm leading-relaxed">Initialize a new battlefield protocol on the blockchain.</p>
+            <p className="text-slate-500 mb-8 font-mono text-sm leading-relaxed">Initialize a new battlefield. ID is auto-copied.</p>
             <button
               onClick={createGame}
               disabled={loading}
@@ -325,7 +378,7 @@ function App() {
             <div className="absolute top-0 right-0 w-full h-1 bg-blue-500 scale-x-0 group-hover:scale-x-100 transition-transform origin-right"></div>
             <Users size={64} className="text-slate-700 group-hover:text-blue-500 mb-6 transition-colors" />
             <h2 className="text-4xl font-black mb-4 uppercase italic">Infiltrate Zone</h2>
-            <p className="text-slate-500 mb-8 font-mono text-sm leading-relaxed">Enter an existing combat code to join the fray.</p>
+            <p className="text-slate-500 mb-8 font-mono text-sm leading-relaxed">Enter an existing combat code to join.</p>
             <div className="flex w-full gap-4">
               <input
                 type="number"
@@ -364,19 +417,21 @@ function App() {
                     <h2 className="text-8xl font-black mb-4 uppercase tracking-tighter italic text-red-600 drop-shadow-[0_0_50px_red]">
                         ZONE DESTROYED
                     </h2>
-                    <h3 className="text-2xl font-mono text-white mb-12 tracking-[1em] uppercase animate-pulse">Evacuating...</h3>
                 </>
             ) : (
                 <>
                     <h2 className={`text-9xl font-black mb-4 uppercase tracking-tighter italic drop-shadow-[0_0_50px_currentColor] ${gameState.winner === TEAM_RED ? 'text-red-600' : 'text-blue-600'}`}>
                         {gameState.winner === TEAM_RED ? 'RED WIN' : 'BLUE WIN'}
                     </h2>
-                    <h3 className="text-2xl font-mono text-white mb-12 tracking-[1em] uppercase">Domination Complete</h3>
-
-                    {myTeam === gameState.winner && (
-                    <div className="mb-12 inline-flex items-center space-x-4 px-8 py-4 bg-green-500/20 border border-green-500 text-green-400 rounded-full animate-pulse">
-                        <Award size={24} /> 
-                        <span className="font-bold font-mono">BOUNTY TRANSFERRED TO WALLET</span>
+                    
+                    {myTeam === gameState.winner ? (
+                    <div className="mb-12 inline-flex flex-col items-center space-y-2 px-8 py-4 bg-green-500/20 border border-green-500 text-green-400 rounded-xl animate-pulse">
+                        <Award size={40} /> 
+                        <span className="font-bold font-mono text-2xl">+50 CREDITS</span>
+                    </div>
+                    ) : ( 
+                    <div className="mb-12 inline-flex flex-col items-center space-y-2 px-8 py-4 bg-slate-500/20 border border-slate-500 text-slate-400 rounded-xl">
+                        <span className="font-bold font-mono text-xl">+15 CREDITS</span>
                     </div>
                     )}
                 </>
@@ -401,26 +456,32 @@ function App() {
             <div className="p-2 bg-slate-800 group-hover:bg-red-600 transition-colors rounded-lg mr-3">
               <Home size={20} className="text-slate-400 group-hover:text-white" />
             </div>
-            <span className="text-xs font-mono font-bold text-slate-500 group-hover:text-red-500 transition-colors uppercase tracking-widest hidden sm:block">
-              LEAVE ZONE
-            </span>
           </button>
 
           <div className="h-8 w-px bg-slate-800 mx-4"></div>
 
           <div className="flex flex-col">
             <span className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Zone Code</span>
-            <span className="text-xl font-black text-white italic leading-none tracking-widest">#{gameState.gameId}</span>
+            <button onClick={() => {navigator.clipboard.writeText(gameState.gameId); alert("ID Copied!")}} className="text-xl font-black text-white italic leading-none tracking-widest hover:text-yellow-500">#{gameState.gameId}</button>
           </div>
         </div>
 
         <div className="flex items-center space-x-3 bg-black/50 px-6 py-2 rounded-full border border-slate-800">
           <Coins size={16} className="text-yellow-500" />
-          <span className="text-yellow-500 font-mono font-bold tabular-nums">{gameState.prizePool} QUAI</span>
+          <span className="text-yellow-500 font-mono font-bold tabular-nums">{credits} CR</span>
         </div>
 
         <div className="flex items-center space-x-4">
-          {account && <div className="text-xs font-mono text-slate-600 hidden sm:block">{account.substring(0, 6)}...</div>}
+           {!playerState.hasPlayed ? (
+               <div className="text-xs bg-green-900/50 text-green-400 px-3 py-1 rounded border border-green-900 animate-pulse font-mono">
+                   SHOP OPEN
+               </div>
+           ) : (
+               <div className="text-xs text-slate-600 px-3 py-1 font-mono">
+                   SHOP LOCKED
+               </div>
+           )}
+          
            <button 
               onClick={abortGame} 
               className="text-red-900 hover:text-red-500 border border-red-900/50 hover:border-red-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest transition-colors mr-2"
@@ -435,10 +496,9 @@ function App() {
 
       <main className="container mx-auto px-4 py-8 max-w-7xl">
 
-        {/* SCOREBOARD / AP BARS */}
+        {/* SCOREBOARD */}
         {gameState.active && (
           <div className="mb-12 bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl relative overflow-hidden">
-
             {/* Turn Indicator */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 text-center pt-2">
               <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${isRedTurn ? 'border-red-500 text-red-500 bg-red-950' : 'border-blue-500 text-blue-500 bg-blue-950'}`}>
@@ -457,14 +517,8 @@ function App() {
                   </div>
                 </div>
                 <div className="h-4 bg-black rounded-full overflow-hidden border border-slate-800 relative">
-                  {/* Target Marker */}
                   <div className="absolute right-0 top-0 bottom-0 w-0.5 bg-white/20 z-10"></div>
-                  <div className="h-full bg-gradient-to-r from-red-900 to-red-600 transition-all duration-700 ease-out relative" style={{ width: `${Math.min(gameState.ap1, 100)}%` }}>
-                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-white animate-pulse shadow-[0_0_10px_white]"></div>
-                  </div>
-                </div>
-                <div className="mt-2 text-xs font-mono text-slate-500">
-                  <span>CARDS: {gameState.cards1}</span>
+                  <div className="h-full bg-gradient-to-r from-red-900 to-red-600 transition-all duration-700 ease-out relative" style={{ width: `${Math.min(gameState.ap1, 100)}%` }}></div>
                 </div>
               </div>
 
@@ -480,41 +534,12 @@ function App() {
                   <h3 className="text-3xl font-black italic text-blue-600 tracking-tighter">BLUE</h3>
                 </div>
                 <div className="h-4 bg-black rounded-full overflow-hidden border border-slate-800 relative">
-                  <div className="absolute right-0 top-0 bottom-0 w-0.5 bg-white/20 z-10"></div>
-                  <div className="h-full bg-gradient-to-l from-blue-900 to-blue-600 transition-all duration-700 ease-out ml-auto relative" style={{ width: `${Math.min(gameState.ap2, 100)}%` }}>
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-white animate-pulse shadow-[0_0_10px_white]"></div>
-                  </div>
-                </div>
-                <div className="mt-2 text-right text-xs font-mono text-slate-500">
-                  <span>CARDS: {gameState.cards2}</span>
+                    <div className="absolute right-0 top-0 bottom-0 w-0.5 bg-white/20 z-10"></div>
+                    <div className="h-full bg-gradient-to-l from-blue-900 to-blue-600 transition-all duration-700 ease-out ml-auto relative" style={{ width: `${Math.min(gameState.ap2, 100)}%` }}></div>
                 </div>
               </div>
             </div>
           </div>
-        )}
-
-        {/* STATUS BAR */}
-        {gameState.active && (
-            <div className="mb-12 flex justify-center animate-in fade-in duration-500">
-                {loading ? (
-                    <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-500 px-8 py-4 font-mono font-bold uppercase tracking-widest animate-pulse flex items-center shadow-[0_0_20px_rgba(234,179,8,0.2)]">
-                        <RefreshCw className="animate-spin mr-4" size={24}/>
-                        PROCESSING TRANSACTION...
-                    </div>
-                ) : (
-                    <div className={`px-10 py-4 font-mono font-bold uppercase tracking-widest border flex items-center shadow-2xl transition-all duration-500
-                        ${isMyTurn ? 'bg-green-500/20 border-green-500 text-green-400 scale-105 shadow-[0_0_30px_rgba(74,222,128,0.2)]' : 
-                          isRedTurn ? 'bg-red-950/40 border-red-900 text-red-600 opacity-80' : 
-                          'bg-blue-950/40 border-blue-900 text-blue-600 opacity-80'}
-                    `}>
-                        {isMyTurn ? (
-                             <>YOUR TURN - DEPLOY CARDS</>
-                        ) : (
-                             <>{isRedTurn ? 'RED' : 'BLUE'} FACTION CHOOSING...</>
-                        )}
-                    </div>
-                )}
-            </div>
         )}
 
         {/* TEAM SELECTION */}
@@ -525,7 +550,7 @@ function App() {
               <h3 className="text-5xl font-black text-red-600 mb-2 italic">RED FACTION</h3>
               <p className="text-red-400/50 mb-8 font-mono">{gameState.count1} OPERATIVES</p>
               <button onClick={() => joinTeam(TEAM_RED)} disabled={loading} className="px-10 py-4 bg-red-600 text-white font-black uppercase tracking-widest hover:bg-red-500 transition-colors w-full">
-                Join / 0.0067 QUAI
+                JOIN TEAM
               </button>
             </div>
 
@@ -534,7 +559,7 @@ function App() {
               <h3 className="text-5xl font-black text-blue-600 mb-2 italic">BLUE FACTION</h3>
               <p className="text-blue-400/50 mb-8 font-mono">{gameState.count2} OPERATIVES</p>
               <button onClick={() => joinTeam(TEAM_BLUE)} disabled={loading} className="px-10 py-4 bg-blue-600 text-white font-black uppercase tracking-widest hover:bg-blue-500 transition-colors w-full">
-                Join / 0.0067 QUAI
+                 JOIN TEAM
               </button>
             </div>
           </div>
@@ -563,6 +588,63 @@ function App() {
           </div>
         )}
 
+        {/* TACTICAL SHOP */}
+        {gameState.active && !playerState.hasPlayed && !gameState.winner && (
+            <div className="mb-12 border border-slate-800 bg-slate-900/50 p-6 rounded-xl animate-in fade-in slide-in-from-top-4">
+                <div className="flex items-center gap-3 mb-6">
+                    <ShoppingCart className="text-yellow-500" />
+                    <h3 className="text-xl font-black italic text-white">TACTICAL BLACK MARKET</h3>
+                    <span className="text-xs text-slate-500 font-mono uppercase ml-auto">Injects code mid-execution</span>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Item 1 */}
+                    <button onClick={() => purchaseAbility(1)} disabled={playerState.dmgMult > 100 || credits < 100} className="group text-left p-4 bg-black border border-slate-800 hover:border-yellow-500 transition-colors relative overflow-hidden disabled:opacity-50 disabled:grayscale">
+                        <div className="absolute inset-0 bg-yellow-500/5 group-hover:bg-yellow-500/10 transition-colors"></div>
+                        <div className="flex justify-between items-start mb-2">
+                             <Cpu className="text-yellow-500" />
+                             <span className="text-xs font-mono font-bold text-yellow-500">100 CR</span>
+                        </div>
+                        <div className="font-bold text-white mb-1">NEURAL OVERCLOCK</div>
+                        <div className="text-xs text-slate-400">+30% All Dmg</div>
+                    </button>
+                    
+                    {/* Item 2 */}
+                    <button onClick={() => purchaseAbility(2)} disabled={credits < 150} className="group text-left p-4 bg-black border border-slate-800 hover:border-blue-500 transition-colors relative overflow-hidden disabled:opacity-50 disabled:grayscale">
+                        <div className="absolute inset-0 bg-blue-500/5 group-hover:bg-blue-500/10 transition-colors"></div>
+                        <div className="flex justify-between items-start mb-2">
+                             <Shield className="text-blue-500" />
+                             <span className="text-xs font-mono font-bold text-blue-500">150 CR</span>
+                        </div>
+                        <div className="font-bold text-white mb-1">FIREWALL EXP.</div>
+                        <div className="text-xs text-slate-400">+2 Extra Cards</div>
+                    </button>
+                    
+                    {/* Item 3 */}
+                    <button onClick={() => purchaseAbility(3)} disabled={playerState.critChance > 0 || credits < 125} className="group text-left p-4 bg-black border border-slate-800 hover:border-red-500 transition-colors relative overflow-hidden disabled:opacity-50 disabled:grayscale">
+                         <div className="absolute inset-0 bg-red-500/5 group-hover:bg-red-500/10 transition-colors"></div>
+                         <div className="flex justify-between items-start mb-2">
+                             <Crosshair className="text-red-500" />
+                             <span className="text-xs font-mono font-bold text-red-500">125 CR</span>
+                        </div>
+                        <div className="font-bold text-white mb-1">CRIT.EXE</div>
+                        <div className="text-xs text-slate-400">20% Chance 2x Dmg</div>
+                    </button>
+                    
+                    {/* Item 4 */}
+                    <button onClick={() => purchaseAbility(4)} disabled={credits < 150} className="group text-left p-4 bg-black border border-slate-800 hover:border-purple-500 transition-colors relative overflow-hidden disabled:opacity-50 disabled:grayscale">
+                         <div className="absolute inset-0 bg-purple-500/5 group-hover:bg-purple-500/10 transition-colors"></div>
+                         <div className="flex justify-between items-start mb-2">
+                             <Radio className="text-purple-500" />
+                             <span className="text-xs font-mono font-bold text-purple-500">150 CR</span>
+                        </div>
+                        <div className="font-bold text-white mb-1">EMP BURST</div>
+                        <div className="text-xs text-slate-400">10 Instant Dmg</div>
+                    </button>
+                </div>
+            </div>
+        )}
+
         {/* HAND */}
         {gameState.active && myTeam !== 0 && (
           <div className="mt-12">
@@ -573,13 +655,17 @@ function App() {
                 <Card
                   key={card.index}
                   {...card}
+                  isOverclocked={playerState.dmgMult > 100}
                   onClick={() => playCard(card.index)}
                   disabled={!isMyTurn || loading}
                 />
               ))}
             </div>
-
-
+            
+            {playerState.critChance > 0 && (
+                 <div className="text-center mt-4 text-xs font-mono text-red-500 animate-pulse">CRIT.EXE ACTIVE - LETHALITY 2X</div>
+            )}
+            
           </div>
         )}
 
